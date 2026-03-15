@@ -20,13 +20,17 @@ A production-ready, PostgreSQL-only logging service for HappiDost. Provides data
    - [6.2 create_audit_log()](#62-create_audit_log)
    - [6.3 create_user_log()](#63-create_user_log)
    - [6.4 create_api_log()](#64-create_api_log)
-7. [Database Tables](#7-database-tables)
-8. [The Upsert Mechanism](#8-the-upsert-mechanism)
-9. [Error Handling](#9-error-handling)
-10. [Thread Safety](#10-thread-safety)
-11. [Testing](#11-testing)
-12. [Integration Examples](#12-integration-examples)
-13. [How Every File Works](#13-how-every-file-works)
+7. [Admin REST API](#7-admin-rest-api)
+   - [7.1 Setup](#71-setup)
+   - [7.2 Endpoints](#72-endpoints)
+   - [7.3 Query Filters](#73-query-filters)
+8. [Database Tables](#8-database-tables)
+9. [The Upsert Mechanism](#9-the-upsert-mechanism)
+10. [Error Handling](#10-error-handling)
+11. [Thread Safety](#11-thread-safety)
+12. [Testing](#12-testing)
+13. [Integration Examples](#13-integration-examples)
+14. [How Every File Works](#14-how-every-file-works)
 
 ---
 
@@ -48,6 +52,9 @@ cd happidost/kratos
 # Production install
 pip install -e .
 
+# With admin REST API (includes FastAPI + uvicorn)
+pip install -e ".[admin]"
+
 # Development install (includes pytest + testcontainers)
 pip install -e ".[dev]"
 ```
@@ -59,6 +66,8 @@ pip install -e ".[dev]"
 | `sqlalchemy>=2.0` | ORM + database engine |
 | `pydantic>=2.0` | Input validation |
 | `psycopg2-binary>=2.9` | PostgreSQL driver |
+| `fastapi>=0.110` | Admin REST API (admin only) |
+| `uvicorn[standard]>=0.29` | ASGI server (admin only) |
 | `pytest>=7.0` | Test runner (dev only) |
 | `pytest-xdist>=3.0` | Parallel test execution (dev only) |
 | `testcontainers[postgres]>=4.0` | Spins up PostgreSQL in Docker for tests (dev only) |
@@ -127,12 +136,17 @@ except ValidationError as e:
 ```
 kratos/
 ├── pyproject.toml                   # Package config, dependencies
-├── TUTORIAL.md                      # This file
+├── README.md                        # This file
 ├── src/
 │   └── kratos/
 │       ├── __init__.py              # Public exports: Kratos, exceptions
 │       ├── client.py                # Kratos class — the public API
 │       ├── exceptions.py            # KratosError, ConfigurationError, ValidationError, DatabaseError
+│       ├── admin/
+│       │   ├── __init__.py          # Exports create_admin_app
+│       │   ├── app.py               # FastAPI app factory — wires Kratos to the admin API
+│       │   ├── routes.py            # REST endpoints for querying logs + stats
+│       │   └── schemas.py           # Pydantic response models (AuditLogOut, etc.)
 │       ├── models/
 │       │   ├── __init__.py          # Re-exports Base + all 3 models
 │       │   ├── base.py              # DeclarativeBase + TimestampMixin
@@ -468,7 +482,138 @@ api = logger.create_api_log(session_id="sess_abc", endpoint="/api/users", action
 
 ---
 
-## 7. Database Tables
+## 7. Admin REST API
+
+Kratos ships with an optional built-in admin API powered by FastAPI. It lets you query all logged data and view stats through REST endpoints — no extra code needed.
+
+### 7.1 Setup
+
+Install with the `admin` extra:
+
+```bash
+pip install -e ".[admin]"
+```
+
+Create and run the admin server:
+
+```python
+import uvicorn
+from kratos import Kratos
+from kratos.admin import create_admin_app
+
+logger = Kratos(db_url="postgresql://user:pass@localhost:5432/mydb")
+app = create_admin_app(logger)
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+Then open `http://localhost:8000/docs` for the interactive Swagger UI.
+
+### 7.2 Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/admin/stats` | Total counts for all log types |
+| GET | `/admin/audit-logs` | List audit logs (paginated, filterable) |
+| GET | `/admin/audit-logs/{id}` | Get a single audit log by ID |
+| GET | `/admin/user-logs` | List user logs (paginated, filterable) |
+| GET | `/admin/user-logs/{id}` | Get a single user log by ID |
+| GET | `/admin/api-logs` | List API logs (paginated, filterable) |
+| GET | `/admin/api-logs/{id}` | Get a single API log by ID |
+
+All list endpoints return results ordered by `created_at` descending (newest first).
+
+### 7.3 Query Filters
+
+All list endpoints support pagination:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 100 | Results per page (1–1000) |
+| `offset` | int | 0 | Skip this many results |
+| `since` | datetime | — | Only return logs created after this timestamp |
+
+#### Audit log filters
+
+| Parameter | Description |
+|-----------|-------------|
+| `action` | Filter by action (exact match) |
+| `ip` | Filter by IP address |
+| `identity` | Filter by identity |
+
+#### User log filters
+
+| Parameter | Description |
+|-----------|-------------|
+| `action` | Filter by action |
+| `ip` | Filter by IP address |
+| `identity` | Filter by identity |
+
+#### API log filters
+
+| Parameter | Description |
+|-----------|-------------|
+| `session_id` | Filter by session ID |
+| `endpoint` | Filter by endpoint |
+| `ip` | Filter by IP address |
+| `action` | Filter by action |
+
+### Example requests
+
+```bash
+# Get stats
+curl http://localhost:8000/admin/stats
+
+# List all audit logs
+curl http://localhost:8000/admin/audit-logs
+
+# Filter audit logs by action
+curl "http://localhost:8000/admin/audit-logs?action=login"
+
+# Filter user logs by identity with pagination
+curl "http://localhost:8000/admin/user-logs?identity=user123&limit=10&offset=0"
+
+# Filter API logs by endpoint
+curl "http://localhost:8000/admin/api-logs?endpoint=/api/users"
+
+# Get logs since a specific time
+curl "http://localhost:8000/admin/audit-logs?since=2026-01-01T00:00:00Z"
+
+# Get a specific log by ID
+curl http://localhost:8000/admin/audit-logs/a1b2c3d4-5678-...
+```
+
+### Response format
+
+All responses are JSON. Example for `/admin/stats`:
+
+```json
+{
+  "audit_logs": 42,
+  "user_logs": 15,
+  "api_logs": 8
+}
+```
+
+Example for `/admin/audit-logs`:
+
+```json
+[
+  {
+    "id": "a1b2c3d4-5678-...",
+    "identity": "user123",
+    "action": "login",
+    "ip": "192.168.1.1",
+    "created_at": "2026-02-28T10:20:47.049546Z",
+    "updated_at": "2026-02-28T10:20:47.049546Z"
+  }
+]
+```
+
+---
+
+## 8. Database Tables
 
 ### audit_logs
 
@@ -509,7 +654,7 @@ api = logger.create_api_log(session_id="sess_abc", endpoint="/api/users", action
 
 ---
 
-## 8. The Upsert Mechanism
+## 9. The Upsert Mechanism
 
 ### Problem
 
@@ -541,7 +686,7 @@ PostgreSQL handles this atomically using row-level locks. Even if 10 threads cal
 
 ---
 
-## 9. Error Handling
+## 10. Error Handling
 
 Kratos has four exception types, all inheriting from `KratosError`:
 
@@ -599,7 +744,7 @@ except KratosError as e:
 
 ---
 
-## 10. Thread Safety
+## 11. Thread Safety
 
 Kratos is thread-safe by design:
 
@@ -626,7 +771,7 @@ for t in threads:
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 ### Prerequisites
 
@@ -673,7 +818,7 @@ pytest tests/ -n auto
 
 ---
 
-## 12. Integration Examples
+## 13. Integration Examples
 
 ### FastAPI middleware
 
@@ -759,7 +904,7 @@ def check_and_log_api_call(session_id: str, endpoint: str, ip: str):
 
 ---
 
-## 13. How Every File Works
+## 14. How Every File Works
 
 ### pyproject.toml
 
@@ -783,6 +928,34 @@ Four exception classes forming a hierarchy:
 - `ConfigurationError` — raised in `__init__` if the DB URL is bad.
 - `ValidationError` — raised when Pydantic rejects input.
 - `DatabaseError` — raised when a DB operation fails (wraps SQLAlchemy exceptions).
+
+### src/kratos/admin/__init__.py
+
+Exports `create_admin_app` — the single entry point for creating an admin FastAPI application.
+
+### src/kratos/admin/app.py
+
+`create_admin_app(kratos_instance)` — factory function that:
+1. Wires the Kratos instance's session factory into the routes module.
+2. Creates a FastAPI app with the `Kratos Admin` title.
+3. Includes the admin router (all `/admin/*` endpoints).
+
+Returns a ready-to-run FastAPI application.
+
+### src/kratos/admin/routes.py
+
+Defines all admin REST endpoints using a FastAPI `APIRouter` with prefix `/admin`:
+- List endpoints (`/audit-logs`, `/user-logs`, `/api-logs`) support filtering by field values, `since` timestamp, and `limit`/`offset` pagination.
+- Detail endpoints (`/audit-logs/{id}`, etc.) return a single log or 404.
+- `/stats` returns total row counts for all three log tables.
+
+All queries use SQLAlchemy `select()` statements and results are serialized through Pydantic response models.
+
+### src/kratos/admin/schemas.py
+
+Pydantic v2 response models for the admin API:
+- `AuditLogOut`, `UserLogOut`, `ApiLogOut` — serialize ORM objects to JSON with `from_attributes=True`.
+- `StatsOut` — simple counts for each log table.
 
 ### src/kratos/models/base.py
 
