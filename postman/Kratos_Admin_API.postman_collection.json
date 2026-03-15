@@ -1,0 +1,464 @@
+{
+	"info": {
+		"name": "Kratos Admin API",
+		"description": "Admin REST API for querying audit logs, user logs, and API logs from the Kratos logging service.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Stats",
+			"item": [
+				{
+					"name": "Get Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/stats",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "stats"]
+						},
+						"description": "Returns total row counts for audit_logs, user_logs, and api_logs tables."
+					}
+				}
+			]
+		},
+		{
+			"name": "Audit Logs",
+			"item": [
+				{
+					"name": "List All Audit Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs"]
+						},
+						"description": "Returns all audit logs ordered by created_at descending."
+					}
+				},
+				{
+					"name": "List Audit Logs — Filter by Action",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs?action=login",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs"],
+							"query": [
+								{
+									"key": "action",
+									"value": "login"
+								}
+							]
+						},
+						"description": "Filter audit logs by action (exact match)."
+					}
+				},
+				{
+					"name": "List Audit Logs — Filter by Identity",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs?identity=user123",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs"],
+							"query": [
+								{
+									"key": "identity",
+									"value": "user123"
+								}
+							]
+						},
+						"description": "Filter audit logs by identity."
+					}
+				},
+				{
+					"name": "List Audit Logs — Filter by IP",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs?ip=192.168.1.1",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs"],
+							"query": [
+								{
+									"key": "ip",
+									"value": "192.168.1.1"
+								}
+							]
+						},
+						"description": "Filter audit logs by IP address."
+					}
+				},
+				{
+					"name": "List Audit Logs — Filter by Since",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs?since=2026-01-01T00:00:00Z",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs"],
+							"query": [
+								{
+									"key": "since",
+									"value": "2026-01-01T00:00:00Z"
+								}
+							]
+						},
+						"description": "Filter audit logs created after a specific timestamp."
+					}
+				},
+				{
+					"name": "List Audit Logs — With Pagination",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs?limit=10&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Paginated audit logs. limit: 1-1000 (default 100), offset: 0+ (default 0)."
+					}
+				},
+				{
+					"name": "Get Audit Log by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/audit-logs/:log_id",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "audit-logs", ":log_id"],
+							"variable": [
+								{
+									"key": "log_id",
+									"value": "",
+									"description": "UUID of the audit log"
+								}
+							]
+						},
+						"description": "Get a single audit log by its ID. Returns 404 if not found."
+					}
+				}
+			]
+		},
+		{
+			"name": "User Logs",
+			"item": [
+				{
+					"name": "List All User Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs"]
+						},
+						"description": "Returns all user logs ordered by created_at descending."
+					}
+				},
+				{
+					"name": "List User Logs — Filter by Identity",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs?identity=user123",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs"],
+							"query": [
+								{
+									"key": "identity",
+									"value": "user123"
+								}
+							]
+						},
+						"description": "Filter user logs by identity."
+					}
+				},
+				{
+					"name": "List User Logs — Filter by Action",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs?action=profile_update",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs"],
+							"query": [
+								{
+									"key": "action",
+									"value": "profile_update"
+								}
+							]
+						},
+						"description": "Filter user logs by action."
+					}
+				},
+				{
+					"name": "List User Logs — Filter by IP",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs?ip=10.0.0.1",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs"],
+							"query": [
+								{
+									"key": "ip",
+									"value": "10.0.0.1"
+								}
+							]
+						},
+						"description": "Filter user logs by IP address."
+					}
+				},
+				{
+					"name": "List User Logs — Filter by Since",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs?since=2026-01-01T00:00:00Z",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs"],
+							"query": [
+								{
+									"key": "since",
+									"value": "2026-01-01T00:00:00Z"
+								}
+							]
+						},
+						"description": "Filter user logs created after a specific timestamp."
+					}
+				},
+				{
+					"name": "List User Logs — With Pagination",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs?limit=10&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Paginated user logs."
+					}
+				},
+				{
+					"name": "Get User Log by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/user-logs/:log_id",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "user-logs", ":log_id"],
+							"variable": [
+								{
+									"key": "log_id",
+									"value": "",
+									"description": "UUID of the user log"
+								}
+							]
+						},
+						"description": "Get a single user log by its ID. Returns 404 if not found."
+					}
+				}
+			]
+		},
+		{
+			"name": "API Logs",
+			"item": [
+				{
+					"name": "List All API Logs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"]
+						},
+						"description": "Returns all API logs ordered by created_at descending."
+					}
+				},
+				{
+					"name": "List API Logs — Filter by Session ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs?session_id=sess_abc",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"],
+							"query": [
+								{
+									"key": "session_id",
+									"value": "sess_abc"
+								}
+							]
+						},
+						"description": "Filter API logs by session ID."
+					}
+				},
+				{
+					"name": "List API Logs — Filter by Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs?endpoint=/api/users",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"],
+							"query": [
+								{
+									"key": "endpoint",
+									"value": "/api/users"
+								}
+							]
+						},
+						"description": "Filter API logs by endpoint."
+					}
+				},
+				{
+					"name": "List API Logs — Filter by Action",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs?action=GET",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"],
+							"query": [
+								{
+									"key": "action",
+									"value": "GET"
+								}
+							]
+						},
+						"description": "Filter API logs by action (HTTP method)."
+					}
+				},
+				{
+					"name": "List API Logs — Filter by IP",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs?ip=1.2.3.4",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"],
+							"query": [
+								{
+									"key": "ip",
+									"value": "1.2.3.4"
+								}
+							]
+						},
+						"description": "Filter API logs by IP address."
+					}
+				},
+				{
+					"name": "List API Logs — Filter by Since",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs?since=2026-01-01T00:00:00Z",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"],
+							"query": [
+								{
+									"key": "since",
+									"value": "2026-01-01T00:00:00Z"
+								}
+							]
+						},
+						"description": "Filter API logs created after a specific timestamp."
+					}
+				},
+				{
+					"name": "List API Logs — With Pagination",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs?limit=10&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Paginated API logs."
+					}
+				},
+				{
+					"name": "Get API Log by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/admin/api-logs/:log_id",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "api-logs", ":log_id"],
+							"variable": [
+								{
+									"key": "log_id",
+									"value": "",
+									"description": "UUID of the API log"
+								}
+							]
+						},
+						"description": "Get a single API log by its ID. Returns 404 if not found."
+					}
+				}
+			]
+		}
+	]
+}
