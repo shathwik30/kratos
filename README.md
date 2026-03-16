@@ -1,6 +1,6 @@
 # Kratos
 
-A production-ready, PostgreSQL-only logging service for HappiDost. Provides database-backed audit logs, user logs, and API logs with atomic upsert behavior.
+A production-ready, PostgreSQL-only logging service for HappiDost. Provides database-backed audit logs, user logs, and API logs with atomic upsert behavior. All admin endpoints are protected by API key authentication.
 
 ---
 
@@ -20,10 +20,14 @@ A production-ready, PostgreSQL-only logging service for HappiDost. Provides data
    - [6.2 create_audit_log()](#62-create_audit_log)
    - [6.3 create_user_log()](#63-create_user_log)
    - [6.4 create_api_log()](#64-create_api_log)
+   - [6.5 create_api_key()](#65-create_api_key)
+   - [6.6 list_api_keys()](#66-list_api_keys)
+   - [6.7 revoke_api_key()](#67-revoke_api_key)
 7. [Admin REST API](#7-admin-rest-api)
    - [7.1 Setup](#71-setup)
-   - [7.2 Endpoints](#72-endpoints)
-   - [7.3 Query Filters](#73-query-filters)
+   - [7.2 Authentication](#72-authentication)
+   - [7.3 Endpoints](#73-endpoints)
+   - [7.4 Query Filters](#74-query-filters)
 8. [Database Tables](#8-database-tables)
 9. [The Upsert Mechanism](#9-the-upsert-mechanism)
 10. [Error Handling](#10-error-handling)
@@ -90,21 +94,25 @@ from kratos import Kratos, ValidationError
 logger = Kratos(db_url="postgresql://user:pass@localhost:5432/mydb")
 # Tables are auto-created on initialization — no migrations needed.
 
-# Step 2: Create an audit log (identity is optional)
+# Step 2: Bootstrap an API key for admin access
+key = logger.create_api_key(name="default-admin")
+print(f"Store this key: {key.key}")  # kra_... — only shown once!
+
+# Step 3: Create an audit log (identity is optional)
 log = logger.create_audit_log(action="login", ip="192.168.1.1")
 print(log.id)          # "a1b2c3d4-..."  (UUID)
 print(log.action)      # "login"
 print(log.created_at)  # 2026-02-28 12:00:00+00:00
 
-# Step 3: Create an audit log with identity
+# Step 4: Create an audit log with identity
 log = logger.create_audit_log(action="login", ip="192.168.1.1", identity="user123")
 print(log.identity)    # "user123"
 
-# Step 4: Create a user log (identity is required)
+# Step 5: Create a user log (identity is required)
 log = logger.create_user_log(identity="user123", action="profile_update", ip="10.0.0.1")
 print(log.identity)    # "user123"
 
-# Step 5: Create an API log — first call creates it
+# Step 6: Create an API log — first call creates it
 api = logger.create_api_log(
     session_id="sess_abc",
     endpoint="/api/users",
@@ -113,7 +121,7 @@ api = logger.create_api_log(
 )
 print(api.attempts)    # 1
 
-# Step 6: Same call again — upserts instead of duplicating
+# Step 7: Same call again — upserts instead of duplicating
 api = logger.create_api_log(
     session_id="sess_abc",
     endpoint="/api/users",
@@ -122,7 +130,7 @@ api = logger.create_api_log(
 )
 print(api.attempts)    # 2  (incremented, not a new row)
 
-# Step 7: Handle validation errors
+# Step 8: Handle validation errors
 try:
     logger.create_user_log(identity="", action="test", ip="bad_ip")
 except ValidationError as e:
@@ -137,22 +145,25 @@ except ValidationError as e:
 kratos/
 ├── pyproject.toml                   # Package config, dependencies
 ├── README.md                        # This file
+├── USAGE.md                         # Quick-start usage guide
 ├── src/
 │   └── kratos/
 │       ├── __init__.py              # Public exports: Kratos, exceptions
 │       ├── client.py                # Kratos class — the public API
-│       ├── exceptions.py            # KratosError, ConfigurationError, ValidationError, DatabaseError
+│       ├── exceptions.py            # KratosError, ConfigurationError, ValidationError, DatabaseError, AuthenticationError
 │       ├── admin/
 │       │   ├── __init__.py          # Exports create_admin_app
-│       │   ├── app.py               # FastAPI app factory — wires Kratos to the admin API
-│       │   ├── routes.py            # REST endpoints for querying logs + stats
-│       │   └── schemas.py           # Pydantic response models (AuditLogOut, etc.)
+│       │   ├── app.py               # FastAPI app factory — wires Kratos + auth middleware
+│       │   ├── auth.py              # API key authentication middleware (x-api-key header)
+│       │   ├── routes.py            # REST endpoints for querying logs, stats, and API key management
+│       │   └── schemas.py           # Pydantic response/request models
 │       ├── models/
-│       │   ├── __init__.py          # Re-exports Base + all 3 models
+│       │   ├── __init__.py          # Re-exports Base + all 4 models
 │       │   ├── base.py              # DeclarativeBase + TimestampMixin
 │       │   ├── audit_log.py         # AuditLog model
 │       │   ├── user_log.py          # UserLog model
-│       │   └── api_log.py           # ApiLog model (with UniqueConstraint)
+│       │   ├── api_log.py           # ApiLog model (with UniqueConstraint)
+│       │   └── api_key.py           # ApiKey model (authentication keys)
 │       ├── db/
 │       │   ├── __init__.py          # Re-exports build_engine, SessionFactory, upsert_api_log
 │       │   ├── engine.py            # PostgreSQL engine with connection pooling
@@ -161,16 +172,18 @@ kratos/
 │       └── validators/
 │           ├── __init__.py          # Re-exports Pydantic schemas
 │           └── schemas.py           # AuditLogInput, UserLogInput, ApiLogInput
-└── tests/
-    ├── conftest.py                  # PostgreSQL testcontainer fixture
-    ├── test_models.py               # Table creation + column verification
-    ├── test_client.py               # End-to-end client tests
-    ├── test_upsert.py               # Upsert logic tests
-    ├── test_validators.py           # Input validation tests
-    └── test_thread_safety.py        # Concurrent write tests
+├── tests/
+│   ├── conftest.py                  # PostgreSQL testcontainer fixture
+│   ├── test_models.py               # Table creation + column verification
+│   ├── test_client.py               # End-to-end client tests (including API key management)
+│   ├── test_upsert.py               # Upsert logic tests
+│   ├── test_validators.py           # Input validation tests
+│   └── test_thread_safety.py        # Concurrent write tests
+└── postman/
+    └── Kratos_Admin_API.postman_collection.json   # Postman collection with auth
 ```
 
-**Design principle**: Each layer has a single responsibility. Models define the schema, `db/` handles connections and queries, `validators/` sanitize input, and `client.py` wires it all together behind three clean methods.
+**Design principle**: Each layer has a single responsibility. Models define the schema, `db/` handles connections and queries, `validators/` sanitize input, `admin/` provides REST access with authentication, and `client.py` wires it all together behind clean methods.
 
 ---
 
@@ -244,6 +257,22 @@ class ApiLog(TimestampMixin, Base):
 
 - The `UniqueConstraint` on `(session_id, endpoint, ip)` is what makes upserts work. PostgreSQL uses this constraint to detect conflicts.
 - `attempts` starts at 1 and increments on each duplicate call.
+
+#### api_key.py
+
+```python
+class ApiKey(TimestampMixin, Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True, default=_generate_api_key)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+```
+
+- `key` is auto-generated with a `kra_` prefix followed by 32 bytes of `secrets.token_urlsafe`. Example: `kra_x9VI1psRf3U1I5qxCRkfhmaMTznlGbU_T_fsinS4LhA`.
+- `is_active` supports soft-delete — revoked keys remain in the table but are rejected by the auth middleware.
+- The `key` column is **indexed** for fast lookups during authentication.
 
 ### 5.2 Database Layer
 
@@ -431,7 +460,7 @@ logger = Kratos(db_url="postgresql://user:pass@localhost:5432/mydb")
 |-----------|------|----------|-------------|
 | `db_url` | `str` | Yes (keyword-only) | PostgreSQL connection URL |
 
-- Tables (`audit_logs`, `user_logs`, `api_logs`) are auto-created on initialization via `Base.metadata.create_all()`.
+- Tables (`audit_logs`, `user_logs`, `api_logs`, `api_keys`) are auto-created on initialization via `Base.metadata.create_all()`.
 - Raises `ConfigurationError` if `db_url` is empty or not a PostgreSQL URL.
 
 ### 6.2 create_audit_log()
@@ -480,11 +509,51 @@ api = logger.create_api_log(session_id="sess_abc", endpoint="/api/users", action
 
 **Upsert behavior**: If a row with the same `(session_id, endpoint, ip)` already exists, `attempts` is incremented and `updated_at` is refreshed instead of creating a new row.
 
+### 6.5 create_api_key()
+
+```python
+key = logger.create_api_key(name="my-service")
+print(key.key)  # kra_... — store this immediately!
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | `str` | Yes | Human-readable label for the key |
+
+**Returns**: `ApiKey` object with `id`, `name`, `key`, `is_active`, `created_at`, `updated_at`.
+
+The raw `key` value is only available at creation time. Store it securely — it cannot be retrieved later.
+
+### 6.6 list_api_keys()
+
+```python
+keys = logger.list_api_keys()
+for k in keys:
+    print(f"{k.name}: active={k.is_active}")
+```
+
+**Returns**: `list[ApiKey]` ordered by `created_at` descending (newest first).
+
+### 6.7 revoke_api_key()
+
+```python
+revoked = logger.revoke_api_key(key_id="a1b2c3d4-...")
+print(revoked.is_active)  # False
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key_id` | `str` | Yes | UUID of the API key to revoke |
+
+**Returns**: `ApiKey` object with `is_active=False`.
+
+Raises `ValidationError` if the key ID is not found. Revoked keys are rejected by the admin API auth middleware.
+
 ---
 
 ## 7. Admin REST API
 
-Kratos ships with an optional built-in admin API powered by FastAPI. It lets you query all logged data and view stats through REST endpoints — no extra code needed.
+Kratos ships with an optional built-in admin API powered by FastAPI. It lets you query all logged data, view stats, and manage API keys through REST endpoints — no extra code needed.
 
 ### 7.1 Setup
 
@@ -502,15 +571,49 @@ from kratos import Kratos
 from kratos.admin import create_admin_app
 
 logger = Kratos(db_url="postgresql://user:pass@localhost:5432/mydb")
+
+# Bootstrap your first API key
+key = logger.create_api_key(name="default-admin")
+print(f"Your API key: {key.key}")  # store this!
+
 app = create_admin_app(logger)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
-Then open `http://localhost:8000/docs` for the interactive Swagger UI.
+Then open `http://localhost:8000/docs` for the interactive Swagger UI (no auth required for docs).
 
-### 7.2 Endpoints
+### 7.2 Authentication
+
+All `/admin/*` endpoints require a valid API key passed via the `x-api-key` header.
+
+```bash
+# Without key — returns 401
+curl http://localhost:8000/admin/stats
+# {"detail": "Missing x-api-key header"}
+
+# With invalid key — returns 403
+curl -H "x-api-key: bad-key" http://localhost:8000/admin/stats
+# {"detail": "Invalid or revoked API key"}
+
+# With valid key — returns 200
+curl -H "x-api-key: kra_..." http://localhost:8000/admin/stats
+# {"audit_logs": 42, "user_logs": 15, "api_logs": 8}
+```
+
+**Bootstrapping your first key**: Use the Kratos client directly (no HTTP needed):
+
+```python
+key = logger.create_api_key(name="default-admin")
+print(key.key)  # kra_x9VI1psRf3U1I5qxCRkfhm...
+```
+
+After that, you can create additional keys via the REST API using the first key.
+
+**Unauthenticated paths**: `/docs`, `/redoc`, and `/openapi.json` are accessible without a key.
+
+### 7.3 Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -521,12 +624,15 @@ Then open `http://localhost:8000/docs` for the interactive Swagger UI.
 | GET | `/admin/user-logs/{id}` | Get a single user log by ID |
 | GET | `/admin/api-logs` | List API logs (paginated, filterable) |
 | GET | `/admin/api-logs/{id}` | Get a single API log by ID |
+| POST | `/admin/api-keys` | Create a new API key |
+| GET | `/admin/api-keys` | List all API keys (key values masked) |
+| DELETE | `/admin/api-keys/{id}` | Revoke an API key (soft-delete) |
 
 All list endpoints return results ordered by `created_at` descending (newest first).
 
-### 7.3 Query Filters
+### 7.4 Query Filters
 
-All list endpoints support pagination:
+All log list endpoints support pagination:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -562,26 +668,39 @@ All list endpoints support pagination:
 ### Example requests
 
 ```bash
+# All examples require the x-api-key header:
+KEY="kra_your-key-here"
+
 # Get stats
-curl http://localhost:8000/admin/stats
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/stats
 
 # List all audit logs
-curl http://localhost:8000/admin/audit-logs
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/audit-logs
 
 # Filter audit logs by action
-curl "http://localhost:8000/admin/audit-logs?action=login"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?action=login"
 
 # Filter user logs by identity with pagination
-curl "http://localhost:8000/admin/user-logs?identity=user123&limit=10&offset=0"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/user-logs?identity=user123&limit=10&offset=0"
 
 # Filter API logs by endpoint
-curl "http://localhost:8000/admin/api-logs?endpoint=/api/users"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/api-logs?endpoint=/api/users"
 
 # Get logs since a specific time
-curl "http://localhost:8000/admin/audit-logs?since=2026-01-01T00:00:00Z"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?since=2026-01-01T00:00:00Z"
 
 # Get a specific log by ID
-curl http://localhost:8000/admin/audit-logs/a1b2c3d4-5678-...
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/audit-logs/a1b2c3d4-5678-...
+
+# Create a new API key
+curl -X POST -H "x-api-key: $KEY" -H "Content-Type: application/json" \
+     -d '{"name": "my-service"}' http://localhost:8000/admin/api-keys
+
+# List all API keys (values masked)
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/api-keys
+
+# Revoke an API key
+curl -X DELETE -H "x-api-key: $KEY" http://localhost:8000/admin/api-keys/<key-id>
 ```
 
 ### Response format
@@ -607,6 +726,34 @@ Example for `/admin/audit-logs`:
     "ip": "192.168.1.1",
     "created_at": "2026-02-28T10:20:47.049546Z",
     "updated_at": "2026-02-28T10:20:47.049546Z"
+  }
+]
+```
+
+Example for `POST /admin/api-keys` (full key shown only at creation):
+
+```json
+{
+  "id": "f1e2d3c4-...",
+  "name": "my-service",
+  "key": "kra_x9VI1psRf3U1I5qxCRkfhmaMTznlGbU_T_fsinS4LhA",
+  "is_active": true,
+  "created_at": "2026-03-16T10:00:00.000000Z",
+  "updated_at": "2026-03-16T10:00:00.000000Z"
+}
+```
+
+Example for `GET /admin/api-keys` (key values masked):
+
+```json
+[
+  {
+    "id": "f1e2d3c4-...",
+    "name": "my-service",
+    "key_prefix": "kra_x9VI...",
+    "is_active": true,
+    "created_at": "2026-03-16T10:00:00.000000Z",
+    "updated_at": "2026-03-16T10:00:00.000000Z"
   }
 ]
 ```
@@ -652,6 +799,19 @@ Example for `/admin/audit-logs`:
 
 **Unique constraint**: `(session_id, endpoint, ip)` — named `uq_api_log_session_endpoint_ip`.
 
+### api_keys
+
+| Column | Type | Nullable | Notes |
+|--------|------|----------|-------|
+| id | VARCHAR(36) | No | Primary key, UUID4 |
+| name | VARCHAR(255) | No | Human-readable label |
+| key | VARCHAR(255) | No | Unique, indexed, auto-generated `kra_` prefix |
+| is_active | BOOLEAN | No | `true` = active, `false` = revoked |
+| created_at | TIMESTAMP WITH TIME ZONE | No | Auto-set |
+| updated_at | TIMESTAMP WITH TIME ZONE | No | Auto-updated |
+
+**Unique constraint**: `key` column is unique and indexed for fast auth lookups.
+
 ---
 
 ## 9. The Upsert Mechanism
@@ -688,17 +848,18 @@ PostgreSQL handles this atomically using row-level locks. Even if 10 threads cal
 
 ## 10. Error Handling
 
-Kratos has four exception types, all inheriting from `KratosError`:
+Kratos has five exception types, all inheriting from `KratosError`:
 
 ```python
-from kratos import KratosError, ConfigurationError, ValidationError, DatabaseError
+from kratos import KratosError, ConfigurationError, ValidationError, DatabaseError, AuthenticationError
 ```
 
 ```
 KratosError                  # Base — catch all kratos errors
 ├── ConfigurationError       # Bad db_url, non-PostgreSQL URL
-├── ValidationError          # Invalid input (empty action, bad IP, etc.)
-└── DatabaseError            # Database operation failed
+├── ValidationError          # Invalid input (empty action, bad IP, empty key name, etc.)
+├── DatabaseError            # Database operation failed
+└── AuthenticationError      # API key missing, invalid, or revoked
 ```
 
 ### Examples
@@ -728,6 +889,11 @@ try:
     logger.create_user_log(identity="user1", action="test", ip="not_an_ip")
 except ValidationError as e:
     print(e)  # validation error for ip
+
+try:
+    logger.create_api_key(name="")
+except ValidationError as e:
+    print(e)  # "API key name must not be empty"
 
 # DatabaseError — connection failure, constraint violation, etc.
 try:
@@ -794,14 +960,13 @@ pytest tests/ -v
 
 ### Test structure
 
-| File | Tests | What it covers |
-|------|-------|---------------|
-| `test_models.py` | 6 | Table creation, columns, constraints |
-| `test_client.py` | 12 | End-to-end: all three log methods + validation errors |
-| `test_upsert.py` | 4 | Upsert logic: insert, increment, separate keys |
-| `test_validators.py` | 15 | Pydantic validation: valid input, empty strings, bad IPs, IPv6 |
-| `test_thread_safety.py` | 3 | Concurrent writes, concurrent upserts, mixed log types |
-| **Total** | **40** | |
+| File | What it covers |
+|------|---------------|
+| `test_models.py` | Table creation, columns, constraints (including `api_keys` table) |
+| `test_client.py` | End-to-end: all log methods, API key management, validation errors |
+| `test_upsert.py` | Upsert logic: insert, increment, separate keys |
+| `test_validators.py` | Pydantic validation: valid input, empty strings, bad IPs, IPv6 |
+| `test_thread_safety.py` | Concurrent writes, concurrent upserts, mixed log types |
 
 ### Run a single test file
 
@@ -902,6 +1067,27 @@ def check_and_log_api_call(session_id: str, endpoint: str, ip: str):
     return log
 ```
 
+### Admin API with authentication
+
+```python
+import uvicorn
+from kratos import Kratos
+from kratos.admin import create_admin_app
+
+logger = Kratos(db_url="postgresql://user:pass@localhost:5432/mydb")
+
+# Bootstrap the first API key (run once)
+key = logger.create_api_key(name="default-admin")
+print(f"Admin key: {key.key}")
+
+# Start the admin server
+app = create_admin_app(logger)
+uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# Then use the key in requests:
+# curl -H "x-api-key: kra_..." http://localhost:8000/admin/stats
+```
+
 ---
 
 ## 14. How Every File Works
@@ -918,16 +1104,17 @@ The package manifest. Tells pip how to install kratos:
 
 The package entry point. When you `from kratos import Kratos`, this file controls what's available:
 - Re-exports `Kratos` from `client.py`.
-- Re-exports all four exception types from `exceptions.py`.
+- Re-exports all five exception types from `exceptions.py`.
 - `__all__` defines the public API.
 
 ### src/kratos/exceptions.py
 
-Four exception classes forming a hierarchy:
+Five exception classes forming a hierarchy:
 - `KratosError` — base, catch-all.
 - `ConfigurationError` — raised in `__init__` if the DB URL is bad.
-- `ValidationError` — raised when Pydantic rejects input.
+- `ValidationError` — raised when Pydantic rejects input or API key name is empty.
 - `DatabaseError` — raised when a DB operation fails (wraps SQLAlchemy exceptions).
+- `AuthenticationError` — raised when an API key is missing, invalid, or revoked.
 
 ### src/kratos/admin/__init__.py
 
@@ -938,24 +1125,37 @@ Exports `create_admin_app` — the single entry point for creating an admin Fast
 `create_admin_app(kratos_instance)` — factory function that:
 1. Wires the Kratos instance's session factory into the routes module.
 2. Creates a FastAPI app with the `Kratos Admin` title.
-3. Includes the admin router (all `/admin/*` endpoints).
+3. Adds the `ApiKeyAuthMiddleware` to validate `x-api-key` headers.
+4. Includes the admin router (all `/admin/*` endpoints).
 
 Returns a ready-to-run FastAPI application.
+
+### src/kratos/admin/auth.py
+
+`ApiKeyAuthMiddleware` — a Starlette `BaseHTTPMiddleware` that:
+1. Allows `/docs`, `/redoc`, `/openapi.json` through without authentication.
+2. Checks for the `x-api-key` header on all other requests.
+3. Looks up the key in the `api_keys` table and verifies `is_active=True`.
+4. Returns 401 if the header is missing, 403 if the key is invalid or revoked.
 
 ### src/kratos/admin/routes.py
 
 Defines all admin REST endpoints using a FastAPI `APIRouter` with prefix `/admin`:
-- List endpoints (`/audit-logs`, `/user-logs`, `/api-logs`) support filtering by field values, `since` timestamp, and `limit`/`offset` pagination.
-- Detail endpoints (`/audit-logs/{id}`, etc.) return a single log or 404.
+- Log list endpoints (`/audit-logs`, `/user-logs`, `/api-logs`) support filtering by field values, `since` timestamp, and `limit`/`offset` pagination.
+- Log detail endpoints (`/audit-logs/{id}`, etc.) return a single log or 404.
 - `/stats` returns total row counts for all three log tables.
+- API key endpoints (`/api-keys`) support create, list, and revoke operations.
 
 All queries use SQLAlchemy `select()` statements and results are serialized through Pydantic response models.
 
 ### src/kratos/admin/schemas.py
 
-Pydantic v2 response models for the admin API:
+Pydantic v2 response and request models for the admin API:
 - `AuditLogOut`, `UserLogOut`, `ApiLogOut` — serialize ORM objects to JSON with `from_attributes=True`.
 - `StatsOut` — simple counts for each log table.
+- `ApiKeyOut` — full API key response (used at creation time, includes raw key).
+- `ApiKeyListOut` — masked API key response (used in list endpoint, shows `key_prefix` only).
+- `ApiKeyCreateIn` — request body for creating a new API key.
 
 ### src/kratos/models/base.py
 
@@ -974,9 +1174,13 @@ The `UserLog` ORM model. Maps to the `user_logs` table. `identity` is NOT nullab
 
 The `ApiLog` ORM model. Maps to the `api_logs` table. Has a `UniqueConstraint` on `(session_id, endpoint, ip)` and an `attempts` counter.
 
+### src/kratos/models/api_key.py
+
+The `ApiKey` ORM model. Maps to the `api_keys` table. Auto-generates a secure `kra_`-prefixed key using `secrets.token_urlsafe`. Supports soft-delete via `is_active`. The `key` column is unique and indexed.
+
 ### src/kratos/models/__init__.py
 
-Re-exports all models so you can do `from kratos.models import AuditLog`.
+Re-exports all models so you can do `from kratos.models import AuditLog, ApiKey`.
 
 ### src/kratos/db/engine.py
 
@@ -1007,11 +1211,14 @@ Re-exports the three Pydantic schemas.
 
 ### src/kratos/client.py
 
-The `Kratos` class — the only thing users interact with:
+The `Kratos` class — the main interface users interact with:
 1. `__init__` — builds engine, creates session factory, auto-creates tables.
 2. `create_audit_log()` — validate → create ORM object → persist → return.
 3. `create_user_log()` — same flow, identity required.
 4. `create_api_log()` — validate → upsert → return.
+5. `create_api_key()` — create a new API key for admin authentication.
+6. `list_api_keys()` — list all API keys (active and revoked).
+7. `revoke_api_key()` — soft-revoke an API key by ID.
 
 All methods use keyword-only arguments (`*`) to prevent positional mistakes.
 
@@ -1023,11 +1230,11 @@ Pytest fixtures:
 
 ### tests/test_models.py
 
-Verifies that `create_all` produces the correct tables with the correct columns and constraints.
+Verifies that `create_all` produces the correct tables with the correct columns and constraints (including `api_keys`).
 
 ### tests/test_client.py
 
-End-to-end tests through the `Kratos` class: creating each log type, verifying returned fields, testing upsert increments, and ensuring invalid input raises `ValidationError`.
+End-to-end tests through the `Kratos` class: creating each log type, API key management, verifying returned fields, testing upsert increments, and ensuring invalid input raises `ValidationError`.
 
 ### tests/test_upsert.py
 

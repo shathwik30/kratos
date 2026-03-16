@@ -4,8 +4,16 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..models import AuditLog, UserLog, ApiLog
-from .schemas import AuditLogOut, UserLogOut, ApiLogOut, StatsOut
+from ..models import AuditLog, UserLog, ApiLog, ApiKey
+from .schemas import (
+    AuditLogOut,
+    UserLogOut,
+    ApiLogOut,
+    StatsOut,
+    ApiKeyOut,
+    ApiKeyListOut,
+    ApiKeyCreateIn,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -132,4 +140,61 @@ def get_stats():
             audit_logs=audit_count,
             user_logs=user_count,
             api_logs=api_count,
+        )
+
+
+# ── API Key Management ──────────────────────────────────
+
+
+@router.post("/api-keys", response_model=ApiKeyOut, status_code=201)
+def create_api_key(body: ApiKeyCreateIn):
+    """Create a new API key. The raw key is only returned once."""
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name must not be empty")
+
+    api_key = ApiKey(name=name)
+    with _get_session() as session:
+        session.add(api_key)
+        session.flush()
+        session.refresh(api_key)
+        return ApiKeyOut.model_validate(api_key)
+
+
+@router.get("/api-keys", response_model=list[ApiKeyListOut])
+def list_api_keys():
+    """List all API keys (key values are masked)."""
+    stmt = select(ApiKey).order_by(ApiKey.created_at.desc())
+    with _get_session() as session:
+        rows = session.execute(stmt).scalars().all()
+        return [
+            ApiKeyListOut(
+                id=r.id,
+                name=r.name,
+                key_prefix=r.key[:8] + "...",
+                is_active=r.is_active,
+                created_at=r.created_at,
+                updated_at=r.updated_at,
+            )
+            for r in rows
+        ]
+
+
+@router.delete("/api-keys/{key_id}", response_model=ApiKeyListOut)
+def revoke_api_key(key_id: str):
+    """Revoke an API key (soft-delete — sets is_active=False)."""
+    with _get_session() as session:
+        api_key = session.get(ApiKey, key_id)
+        if not api_key:
+            raise HTTPException(status_code=404, detail="API key not found")
+        api_key.is_active = False
+        session.flush()
+        session.refresh(api_key)
+        return ApiKeyListOut(
+            id=api_key.id,
+            name=api_key.name,
+            key_prefix=api_key.key[:8] + "...",
+            is_active=api_key.is_active,
+            created_at=api_key.created_at,
+            updated_at=api_key.updated_at,
         )

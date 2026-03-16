@@ -19,5 +19,5 @@ def logger(pg_url):
     # Clean tables between tests so they don't leak state
     from sqlalchemy import text
     with k._engine.connect() as conn:
-        conn.execute(text("TRUNCATE audit_logs, user_logs, api_logs"))
+        conn.execute(text("TRUNCATE audit_logs, user_logs, api_logs, api_keys"))
         conn.commit()

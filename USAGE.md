@@ -84,7 +84,35 @@ except ValidationError as e:
 
 ---
 
-## 3. Reading Logs (Admin REST API)
+## 3. API Key Management
+
+All admin REST endpoints require authentication via the `x-api-key` header. Use the Kratos client to manage API keys.
+
+### Create your first key
+
+```python
+key = logger.create_api_key(name="default-admin")
+print(f"Store this key: {key.key}")  # kra_... — only shown once!
+```
+
+### List all keys
+
+```python
+keys = logger.list_api_keys()
+for k in keys:
+    print(f"id={k.id}  name={k.name}  active={k.is_active}")
+```
+
+### Revoke a key
+
+```python
+revoked = logger.revoke_api_key(key_id="a1b2c3d4-...")
+print(f"Revoked: {revoked.is_active}")  # False
+```
+
+---
+
+## 4. Reading Logs (Admin REST API)
 
 ### Start the admin server
 
@@ -94,6 +122,11 @@ from kratos import Kratos
 from kratos.admin import create_admin_app
 
 logger = Kratos(db_url="postgresql://user:pass@localhost:5432/mydb")
+
+# Bootstrap your first API key
+key = logger.create_api_key(name="default-admin")
+print(f"Your API key: {key.key}")
+
 app = create_admin_app(logger)
 
 if __name__ == "__main__":
@@ -106,14 +139,22 @@ python main.py
 
 ### Swagger UI
 
-Open `http://localhost:8000/docs` in your browser to explore and test all endpoints interactively.
+Open `http://localhost:8000/docs` in your browser to explore and test all endpoints interactively (no auth required for docs).
+
+### Authentication
+
+All `/admin/*` endpoints require the `x-api-key` header:
+
+```bash
+KEY="kra_your-key-here"
+```
 
 ### Endpoints
 
 #### Stats
 
 ```bash
-curl http://localhost:8000/admin/stats
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/stats
 ```
 
 ```json
@@ -124,67 +165,81 @@ curl http://localhost:8000/admin/stats
 
 ```bash
 # All audit logs
-curl http://localhost:8000/admin/audit-logs
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/audit-logs
 
 # Filter by action
-curl "http://localhost:8000/admin/audit-logs?action=login"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?action=login"
 
 # Filter by identity
-curl "http://localhost:8000/admin/audit-logs?identity=user123"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?identity=user123"
 
 # Filter by IP
-curl "http://localhost:8000/admin/audit-logs?ip=192.168.1.1"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?ip=192.168.1.1"
 
 # Filter by time
-curl "http://localhost:8000/admin/audit-logs?since=2026-01-01T00:00:00Z"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?since=2026-01-01T00:00:00Z"
 
 # Pagination
-curl "http://localhost:8000/admin/audit-logs?limit=10&offset=20"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/audit-logs?limit=10&offset=20"
 
 # Get a single log by ID
-curl http://localhost:8000/admin/audit-logs/<id>
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/audit-logs/<id>
 ```
 
 #### User Logs
 
 ```bash
 # All user logs
-curl http://localhost:8000/admin/user-logs
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/user-logs
 
 # Filter by identity
-curl "http://localhost:8000/admin/user-logs?identity=user456"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/user-logs?identity=user456"
 
 # Filter by action
-curl "http://localhost:8000/admin/user-logs?action=password_change"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/user-logs?action=password_change"
 
 # Get a single log by ID
-curl http://localhost:8000/admin/user-logs/<id>
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/user-logs/<id>
 ```
 
 #### API Logs
 
 ```bash
 # All API logs
-curl http://localhost:8000/admin/api-logs
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/api-logs
 
 # Filter by endpoint
-curl "http://localhost:8000/admin/api-logs?endpoint=/api/users"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/api-logs?endpoint=/api/users"
 
 # Filter by session
-curl "http://localhost:8000/admin/api-logs?session_id=sess_abc"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/api-logs?session_id=sess_abc"
 
 # Filter by IP
-curl "http://localhost:8000/admin/api-logs?ip=1.2.3.4"
+curl -H "x-api-key: $KEY" "http://localhost:8000/admin/api-logs?ip=1.2.3.4"
 
 # Get a single log by ID
-curl http://localhost:8000/admin/api-logs/<id>
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/api-logs/<id>
+```
+
+#### API Keys
+
+```bash
+# Create a new API key (full key shown only in response)
+curl -X POST -H "x-api-key: $KEY" -H "Content-Type: application/json" \
+     -d '{"name": "my-service"}' http://localhost:8000/admin/api-keys
+
+# List all API keys (key values masked)
+curl -H "x-api-key: $KEY" http://localhost:8000/admin/api-keys
+
+# Revoke an API key
+curl -X DELETE -H "x-api-key: $KEY" http://localhost:8000/admin/api-keys/<key-id>
 ```
 
 ---
 
-## 4. Full Example (main.py)
+## 5. Full Example (main.py)
 
-This is a complete working example that creates sample logs and starts the admin server:
+This is a complete working example that creates sample logs, bootstraps an API key, and starts the admin server:
 
 ```python
 import uvicorn
@@ -227,31 +282,34 @@ print(f"[api]    id={api.id}  endpoint={api.endpoint}  attempts={api.attempts}  
 api = logger.create_api_log(session_id="sess_xyz", endpoint="/api/orders", action="POST", ip="5.6.7.8")
 print(f"[api]    id={api.id}  endpoint={api.endpoint}  attempts={api.attempts}")
 
-print("\nSample data created. Starting admin server...\n")
+print("\nSample data created.\n")
 
 # ──────────────────────────────────────────────
-# STEP 2: Start the admin API to view the data
+# STEP 2: Bootstrap an API key for admin access
+# ──────────────────────────────────────────────
+
+api_key = logger.create_api_key(name="default-admin")
+print(f"API Key created: {api_key.key}")
+print("Use this key in the x-api-key header to access admin endpoints.\n")
+
+# ──────────────────────────────────────────────
+# STEP 3: Start the admin API to view the data
 # ──────────────────────────────────────────────
 #
-# Once running, open these URLs in your browser:
+# All endpoints now require the x-api-key header:
 #
-#   Swagger UI:          http://localhost:8000/docs
+#   curl -H "x-api-key: <your-key>" http://localhost:8000/admin/stats
+#   curl -H "x-api-key: <your-key>" http://localhost:8000/admin/audit-logs
+#   curl -H "x-api-key: <your-key>" http://localhost:8000/admin/user-logs
+#   curl -H "x-api-key: <your-key>" http://localhost:8000/admin/api-logs
 #
-#   Stats:               http://localhost:8000/admin/stats
+# API Key Management:
+#   curl -X POST -H "x-api-key: <your-key>" -H "Content-Type: application/json" \
+#        -d '{"name": "my-service"}' http://localhost:8000/admin/api-keys
+#   curl -H "x-api-key: <your-key>" http://localhost:8000/admin/api-keys
+#   curl -X DELETE -H "x-api-key: <your-key>" http://localhost:8000/admin/api-keys/<key-id>
 #
-#   All audit logs:      http://localhost:8000/admin/audit-logs
-#   Filter by action:    http://localhost:8000/admin/audit-logs?action=login
-#   Filter by identity:  http://localhost:8000/admin/audit-logs?identity=user123
-#   Single audit log:    http://localhost:8000/admin/audit-logs/<id>
-#
-#   All user logs:       http://localhost:8000/admin/user-logs
-#   Filter by identity:  http://localhost:8000/admin/user-logs?identity=user456
-#   Single user log:     http://localhost:8000/admin/user-logs/<id>
-#
-#   All API logs:        http://localhost:8000/admin/api-logs
-#   Filter by endpoint:  http://localhost:8000/admin/api-logs?endpoint=/api/users
-#   Filter by session:   http://localhost:8000/admin/api-logs?session_id=sess_abc
-#   Single API log:      http://localhost:8000/admin/api-logs/<id>
+# Swagger UI (no auth required): http://localhost:8000/docs
 #
 
 app = create_admin_app(logger)
@@ -281,10 +339,19 @@ python main.py
 [api]    id=u1v2w3x4-...  endpoint=/api/users  attempts=2  (upserted)
 [api]    id=y5z6a7b8-...  endpoint=/api/orders  attempts=1
 
-Sample data created. Starting admin server...
+Sample data created.
+
+API Key created: kra_x9VI1psRf3U1I5qxCRkfhmaMTznlGbU_T_fsinS4LhA
+Use this key in the x-api-key header to access admin endpoints.
 
 INFO:     Started server process
 INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
-Then visit `http://localhost:8000/docs` to browse all your logs.
+Then use the printed key to access the admin API:
+
+```bash
+curl -H "x-api-key: kra_x9VI1psRf3U1I5qxCRkfhm..." http://localhost:8000/admin/stats
+```
+
+Or visit `http://localhost:8000/docs` to browse the Swagger UI.

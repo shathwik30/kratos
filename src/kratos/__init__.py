@@ -1,5 +1,11 @@
 from .client import Kratos
-from .exceptions import KratosError, ConfigurationError, ValidationError, DatabaseError
+from .exceptions import (
+    KratosError,
+    ConfigurationError,
+    ValidationError,
+    DatabaseError,
+    AuthenticationError,
+)
 
 __all__ = [
     "Kratos",
@@ -7,4 +13,5 @@ __all__ = [
     "ConfigurationError",
     "ValidationError",
     "DatabaseError",
+    "AuthenticationError",
 ]

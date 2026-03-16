@@ -12,3 +12,7 @@ class ValidationError(KratosError):
 
 class DatabaseError(KratosError):
     """Raised when a database operation fails."""
+
+
+class AuthenticationError(KratosError):
+    """Raised when an API key is missing, invalid, or revoked."""

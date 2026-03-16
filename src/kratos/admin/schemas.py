@@ -42,3 +42,28 @@ class StatsOut(BaseModel):
     audit_logs: int
     user_logs: int
     api_logs: int
+
+
+class ApiKeyOut(BaseModel):
+    id: str
+    name: str
+    key: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyListOut(BaseModel):
+    """List response — hides the raw key value for security."""
+    id: str
+    name: str
+    key_prefix: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApiKeyCreateIn(BaseModel):
+    name: str
